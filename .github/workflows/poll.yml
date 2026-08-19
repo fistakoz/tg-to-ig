@@ -2,12 +2,12 @@ name: dm-poll
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # 5 dk'da bir (public repo → sınırsız ücretsiz)
-  workflow_dispatch: {} # elle tetikleme (test için)
+    - cron: "0 */6 * * *" # ~6 saatte bir uzun döngüyü (yeniden) başlat
+  workflow_dispatch: {} # elle başlat
 
-# Aynı anda iki çalışma çakışmasın
+# Aynı anda tek döngü çalışsın
 concurrency:
-  group: poll
+  group: poller
   cancel-in-progress: false
 
 permissions:
@@ -16,6 +16,7 @@ permissions:
 jobs:
   poll:
     runs-on: ubuntu-latest
+    timeout-minutes: 355 # ~6 saatlik job sınırının hemen altında güvenlik kapağı
     steps:
       - uses: actions/checkout@v4
 
@@ -31,21 +32,21 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Poller
+      - name: Poll döngüsü (~1 dk'da bir)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
-        run: python poll.py
-
-      - name: Durumu kaydet (seen.json)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add seen.json
-          if git diff --cached --quiet; then
-            echo "durum değişmedi"
-          else
-            git commit -m "chore: seen state güncelle [skip ci]"
-            git push
-          fi
+          END=$(( $(date +%s) + 21000 ))   # ~5 saat 50 dk döngü, sonra job biter ve schedule yeniden başlatır
+          while [ "$(date +%s)" -lt "$END" ]; do
+            python poll.py || true
+            if ! git diff --quiet seen.json 2>/dev/null; then
+              git add seen.json
+              git commit -m "chore: seen state [skip ci]" || true
+              git push || true
+            fi
+            sleep 60
+          done
