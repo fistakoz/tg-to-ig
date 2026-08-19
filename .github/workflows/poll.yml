@@ -1,0 +1,51 @@
+name: dm-poll
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # 5 dk'da bir (public repo → sınırsız ücretsiz)
+  workflow_dispatch: {} # elle tetikleme (test için)
+
+# Aynı anda iki çalışma çakışmasın
+concurrency:
+  group: poll
+  cancel-in-progress: false
+
+permissions:
+  contents: write # seen.json'ı repoya geri commit'lemek için
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Emoji fontu (🛣️🔁 render için)
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-color-emoji
+
+      - name: Bağımlılıklar
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Poller
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOURCE_URL: ${{ secrets.SOURCE_URL }}
+        run: python poll.py
+
+      - name: Durumu kaydet (seen.json)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen.json
+          if git diff --cached --quiet; then
+            echo "durum değişmedi"
+          else
+            git commit -m "chore: seen state güncelle [skip ci]"
+            git push
+          fi
